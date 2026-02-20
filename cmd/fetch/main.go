@@ -52,7 +52,7 @@ func main() {
 	ctx := context.Background()
 
 	now := time.Now()
-	startYear := 2020
+	startYear := 2001
 	endYear := now.Year()
 	endMonth := int(now.Month())
 
