@@ -30,6 +30,9 @@ vendor/
 *.db-wal
 *.db-journal
 
+# Build output
+build/
+
 # OS
 .DS_Store
 Thumbs.db

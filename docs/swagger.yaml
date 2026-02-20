@@ -1,0 +1,97 @@
+basePath: /
+host: 158.179.160.120:7847
+info:
+  contact: {}
+  description: TJ 노래방 곡 검색 API
+  title: Musicon API
+  version: "1.0"
+paths:
+  /api/songs/{number}:
+    get:
+      description: TJ 노래방 번호로 곡을 조회합니다
+      parameters:
+      - description: TJ 노래방 번호
+        in: path
+        name: number
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: TJ 번호로 곡 조회
+      tags:
+      - songs
+  /api/songs/search:
+    get:
+      description: 제목, 가수, 초성으로 곡을 검색합니다
+      parameters:
+      - description: 검색어 (제목/가수/초성)
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: 결과 수 (기본 20, 최대 100)
+        in: query
+        name: limit
+        type: integer
+      - description: 오프셋 (기본 0)
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 곡 검색
+      tags:
+      - songs
+  /health:
+    get:
+      description: 서버 상태 확인
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 헬스체크
+      tags:
+      - system
+swagger: "2.0"

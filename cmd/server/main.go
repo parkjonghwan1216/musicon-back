@@ -11,14 +11,21 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/swagger"
 	_ "modernc.org/sqlite"
 
+	_ "musicon-back/docs"
 	"musicon-back/internal/config"
 	"musicon-back/internal/handler"
 	"musicon-back/internal/repository"
 	"musicon-back/internal/service"
 )
 
+// @title       Musicon API
+// @version     1.0
+// @description TJ 노래방 곡 검색 API
+// @host        158.179.160.120:7847
+// @BasePath    /
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -59,6 +66,7 @@ func main() {
 	app.Use(logger.New())
 	app.Use(cors.New())
 
+	app.Get("/swagger/*", swagger.HandlerDefault)
 	app.Get("/health", handler.HealthCheck)
 
 	api := app.Group("/api")
