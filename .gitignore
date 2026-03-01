@@ -18,6 +18,9 @@ vendor/
 # Environment
 .env
 
+# Claude
+.claude/
+
 # IDE
 .idea/
 .vscode/

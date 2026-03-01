@@ -41,15 +41,19 @@ func (r *SQLiteSongRepository) Search(ctx context.Context, query string, limit, 
 		   OR artist LIKE ?
 		   OR title_chosung LIKE ?
 		   OR artist_chosung LIKE ?
+		   OR CAST(tj_number AS TEXT) LIKE ?
 		ORDER BY
-		  CASE WHEN title LIKE ? THEN 0 ELSE 1 END,
+		  CASE WHEN CAST(tj_number AS TEXT) = ? THEN 0
+		       WHEN title LIKE ? THEN 1
+		       ELSE 2 END,
 		  title ASC
 		LIMIT ? OFFSET ?
 	`
 
 	rows, err := r.db.QueryContext(ctx, q,
 		likePattern, likePattern, likePattern, likePattern,
-		prefixPattern,
+		likePattern,
+		query, prefixPattern,
 		limit, offset,
 	)
 	if err != nil {
