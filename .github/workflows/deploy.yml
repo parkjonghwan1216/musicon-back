@@ -17,7 +17,7 @@ jobs:
       - name: Build
         run: GOOS=linux GOARCH=amd64 go build -o musicon-server ./cmd/server
 
-      - name: Deploy to server
+      - name: Setup SSH
         env:
           SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           HOST: ${{ secrets.SERVER_HOST }}
@@ -27,16 +27,22 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts 2>/dev/null
 
-          scp -i ~/.ssh/deploy_key musicon-server ubuntu@$HOST:~/musicon-server-new
+      - name: Upload binary
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+        run: scp -i ~/.ssh/deploy_key musicon-server ubuntu@$HOST:~/musicon-server-new
 
-          ssh -i ~/.ssh/deploy_key ubuntu@$HOST << 'EOF'
-            sudo systemctl stop musicon
-            sudo cp ~/musicon-server-new /opt/musicon/musicon-server
-            sudo chmod +x /opt/musicon/musicon-server
-            sudo chown musicon:musicon /opt/musicon/musicon-server
-            sudo systemctl start musicon
-            rm ~/musicon-server-new
-            sleep 2
-            curl -sf localhost:7847/health || exit 1
-            echo "Deploy successful"
-          EOF
+      - name: Restart service
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@$HOST "\
+            sudo systemctl stop musicon && \
+            sudo cp ~/musicon-server-new /opt/musicon/musicon-server && \
+            sudo chmod +x /opt/musicon/musicon-server && \
+            sudo chown musicon:musicon /opt/musicon/musicon-server && \
+            sudo systemctl start musicon && \
+            rm ~/musicon-server-new && \
+            sleep 2 && \
+            curl -sf localhost:7847/health && \
+            echo 'Deploy successful'"
