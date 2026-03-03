@@ -17,6 +17,7 @@ import (
 	_ "musicon-back/docs"
 	"musicon-back/internal/config"
 	"musicon-back/internal/handler"
+	"musicon-back/internal/migration"
 	"musicon-back/internal/repository"
 	"musicon-back/internal/service"
 )
@@ -45,7 +46,7 @@ func main() {
 		log.Fatalf("Failed to enable foreign keys: %v", err)
 	}
 
-	if err := runMigrations(db); err != nil {
+	if err := migration.RunAll(db, "migrations"); err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
@@ -55,8 +56,16 @@ func main() {
 	log.Println("Connected to database")
 
 	songRepo := repository.NewSQLiteSongRepository(db)
+	deviceRepo := repository.NewSQLiteDeviceRepository(db)
+	reservationRepo := repository.NewSQLiteReservationRepository(db)
+
 	songService := service.NewSongService(songRepo)
+	deviceService := service.NewDeviceService(deviceRepo)
+	reservationService := service.NewReservationService(reservationRepo, deviceRepo)
+
 	songHandler := handler.NewSongHandler(songService)
+	deviceHandler := handler.NewDeviceHandler(deviceService)
+	reservationHandler := handler.NewReservationHandler(reservationService)
 
 	app := fiber.New(fiber.Config{
 		AppName: "Musicon API",
@@ -72,6 +81,13 @@ func main() {
 	api := app.Group("/api")
 	api.Get("/songs/search", songHandler.Search)
 	api.Get("/songs/:number", songHandler.FindByTjNumber)
+
+	api.Post("/devices/register", deviceHandler.Register)
+
+	api.Post("/reservations", reservationHandler.Create)
+	api.Get("/reservations", reservationHandler.List)
+	api.Put("/reservations/:id", reservationHandler.Update)
+	api.Delete("/reservations/:id", reservationHandler.Delete)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -94,17 +110,3 @@ func main() {
 	log.Println("Server stopped")
 }
 
-func runMigrations(db *sql.DB) error {
-	migrationSQL, err := os.ReadFile("migrations/001_create_songs.sql")
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Exec(string(migrationSQL))
-	if err != nil {
-		return err
-	}
-
-	log.Println("Migrations applied successfully")
-	return nil
-}

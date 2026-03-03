@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -11,11 +12,18 @@ import (
 	"github.com/joho/godotenv"
 	_ "modernc.org/sqlite"
 
+	"musicon-back/internal/domain"
 	"musicon-back/internal/fetcher"
+	"musicon-back/internal/migration"
+	"musicon-back/internal/notification"
 	"musicon-back/internal/repository"
+	"musicon-back/internal/service"
 )
 
 func main() {
+	currentMonth := flag.Bool("current-month", false, "fetch only the current month (for daily cron)")
+	flag.Parse()
+
 	_ = godotenv.Load()
 
 	dbURL := os.Getenv("DATABASE_URL")
@@ -38,33 +46,51 @@ func main() {
 		log.Fatalf("Failed to enable WAL mode: %v", err)
 	}
 
-	// Run migrations
-	migrationSQL, err := os.ReadFile("migrations/001_create_songs.sql")
-	if err != nil {
-		log.Fatalf("Failed to read migration file: %v", err)
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		log.Fatalf("Failed to enable foreign keys: %v", err)
 	}
-	if _, err := db.Exec(string(migrationSQL)); err != nil {
+
+	if err := migration.RunAll(db, "migrations"); err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
-	repo := repository.NewSQLiteSongRepository(db)
+	songRepo := repository.NewSQLiteSongRepository(db)
+	reservationRepo := repository.NewSQLiteReservationRepository(db)
 	tj := fetcher.NewTJFetcher(tjBaseURL)
-	ctx := context.Background()
+	pushService := notification.NewExpoPushService()
+	matchingService := service.NewMatchingService(reservationRepo, pushService)
 
+	ctx := context.Background()
 	now := time.Now()
-	startYear := 2001
-	endYear := now.Year()
-	endMonth := int(now.Month())
+
+	var startYear, startMonth, endYear, endMonth int
+
+	if *currentMonth {
+		startYear = now.Year()
+		startMonth = int(now.Month())
+		endYear = startYear
+		endMonth = startMonth
+	} else {
+		startYear = 2001
+		startMonth = 1
+		endYear = now.Year()
+		endMonth = int(now.Month())
+	}
 
 	var totalInserted int64
+	var allFetchedSongs []domain.Song
 
 	for year := startYear; year <= endYear; year++ {
-		maxMonth := 12
+		monthStart := 1
+		if year == startYear {
+			monthStart = startMonth
+		}
+		monthEnd := 12
 		if year == endYear {
-			maxMonth = endMonth
+			monthEnd = endMonth
 		}
 
-		for month := 1; month <= maxMonth; month++ {
+		for month := monthStart; month <= monthEnd; month++ {
 			label := fmt.Sprintf("%04d-%02d", year, month)
 			log.Printf("Fetching %s ...", label)
 
@@ -79,13 +105,14 @@ func main() {
 				continue
 			}
 
-			inserted, err := repo.UpsertMany(ctx, songs)
+			inserted, err := songRepo.UpsertMany(ctx, songs)
 			if err != nil {
 				log.Printf("Warning: failed to upsert %s: %v", label, err)
 				continue
 			}
 
 			totalInserted += inserted
+			allFetchedSongs = append(allFetchedSongs, songs...)
 			log.Printf("  %s: %d songs upserted", label, inserted)
 
 			time.Sleep(500 * time.Millisecond) // rate limit
@@ -93,4 +120,14 @@ func main() {
 	}
 
 	log.Printf("Done! Total songs upserted: %d", totalInserted)
+
+	// Run matching against fetched songs
+	if len(allFetchedSongs) > 0 {
+		matched, err := matchingService.MatchNewSongs(ctx, allFetchedSongs)
+		if err != nil {
+			log.Printf("Warning: matching failed: %v", err)
+		} else {
+			log.Printf("Matching complete: %d matches found", matched)
+		}
+	}
 }
