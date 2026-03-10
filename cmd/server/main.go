@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -16,10 +17,13 @@ import (
 
 	_ "musicon-back/docs"
 	"musicon-back/internal/config"
+	"musicon-back/internal/fetcher"
 	"musicon-back/internal/handler"
 	"musicon-back/internal/migration"
+	"musicon-back/internal/notification"
 	"musicon-back/internal/provider"
 	"musicon-back/internal/repository"
+	"musicon-back/internal/scheduler"
 	"musicon-back/internal/service"
 )
 
@@ -109,6 +113,13 @@ func main() {
 	api.Post("/music/sync", musicHandler.SyncTracks)
 	api.Get("/music/matches", musicHandler.GetMatches)
 
+	// TJ 최신곡 스케줄러 (12시간마다 = 하루 2회)
+	tjFetcher := fetcher.NewTJFetcher(cfg.TJAPIBaseURL)
+	pushService := notification.NewExpoPushService()
+	matchingService := service.NewMatchingService(reservationRepo, pushService)
+	songScheduler := scheduler.NewSongScheduler(tjFetcher, songRepo, matchingService, 12*time.Hour)
+	songScheduler.Start()
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -122,6 +133,8 @@ func main() {
 
 	<-quit
 	log.Println("Shutting down server...")
+
+	songScheduler.Stop()
 
 	if err := app.Shutdown(); err != nil {
 		log.Fatalf("Server shutdown failed: %v", err)
