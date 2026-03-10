@@ -10,6 +10,11 @@ type Config struct {
 	DatabaseURL  string
 	ServerPort   string
 	TJAPIBaseURL string
+
+	SpotifyClientID     string
+	SpotifyClientSecret string
+	YouTubeClientID     string
+	YouTubeClientSecret string
 }
 
 func Load() (*Config, error) {
@@ -19,6 +24,11 @@ func Load() (*Config, error) {
 		DatabaseURL:  os.Getenv("DATABASE_URL"),
 		ServerPort:   os.Getenv("SERVER_PORT"),
 		TJAPIBaseURL: os.Getenv("TJ_API_BASE_URL"),
+
+		SpotifyClientID:     os.Getenv("SPOTIFY_CLIENT_ID"),
+		SpotifyClientSecret: os.Getenv("SPOTIFY_CLIENT_SECRET"),
+		YouTubeClientID:     os.Getenv("YOUTUBE_CLIENT_ID"),
+		YouTubeClientSecret: os.Getenv("YOUTUBE_CLIENT_SECRET"),
 	}
 
 	if cfg.DatabaseURL == "" {

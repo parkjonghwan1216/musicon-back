@@ -18,6 +18,7 @@ import (
 	"musicon-back/internal/config"
 	"musicon-back/internal/handler"
 	"musicon-back/internal/migration"
+	"musicon-back/internal/provider"
 	"musicon-back/internal/repository"
 	"musicon-back/internal/service"
 )
@@ -58,14 +59,26 @@ func main() {
 	songRepo := repository.NewSQLiteSongRepository(db)
 	deviceRepo := repository.NewSQLiteDeviceRepository(db)
 	reservationRepo := repository.NewSQLiteReservationRepository(db)
+	musicAccountRepo := repository.NewSQLiteMusicAccountRepository(db)
+	musicTrackRepo := repository.NewSQLiteMusicTrackRepository(db)
+	trackMatchRepo := repository.NewSQLiteTrackMatchRepository(db)
+
+	// Music providers
+	spotifyProvider := provider.NewSpotifyProvider(cfg.SpotifyClientID, cfg.SpotifyClientSecret)
+	youtubeProvider := provider.NewYouTubeProvider(cfg.YouTubeClientID, cfg.YouTubeClientSecret)
+	providerRegistry := provider.NewRegistry(spotifyProvider, youtubeProvider)
 
 	songService := service.NewSongService(songRepo)
 	deviceService := service.NewDeviceService(deviceRepo)
 	reservationService := service.NewReservationService(reservationRepo, deviceRepo)
+	musicAuthService := service.NewMusicAuthService(musicAccountRepo, musicTrackRepo, deviceRepo, providerRegistry)
+	musicSyncService := service.NewMusicSyncService(musicAccountRepo, musicTrackRepo, trackMatchRepo, deviceRepo, providerRegistry, musicAuthService)
+	musicQueryService := service.NewMusicQueryService(trackMatchRepo, deviceRepo)
 
 	songHandler := handler.NewSongHandler(songService)
 	deviceHandler := handler.NewDeviceHandler(deviceService)
 	reservationHandler := handler.NewReservationHandler(reservationService)
+	musicHandler := handler.NewMusicHandler(musicAuthService, musicSyncService, musicQueryService)
 
 	app := fiber.New(fiber.Config{
 		AppName: "Musicon API",
@@ -88,6 +101,13 @@ func main() {
 	api.Get("/reservations", reservationHandler.List)
 	api.Put("/reservations/:id", reservationHandler.Update)
 	api.Delete("/reservations/:id", reservationHandler.Delete)
+
+	api.Post("/music/spotify/connect", musicHandler.ConnectSpotify)
+	api.Post("/music/youtube/connect", musicHandler.ConnectYouTube)
+	api.Get("/music/accounts", musicHandler.ListAccounts)
+	api.Delete("/music/accounts/:provider", musicHandler.DisconnectAccount)
+	api.Post("/music/sync", musicHandler.SyncTracks)
+	api.Get("/music/matches", musicHandler.GetMatches)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
