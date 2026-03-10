@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/swagger"
 	_ "modernc.org/sqlite"
+	"gopkg.in/lumberjack.v2"
 
 	_ "musicon-back/docs"
 	"musicon-back/internal/config"
@@ -33,6 +35,18 @@ import (
 // @host        158.179.160.120:7847
 // @BasePath    /
 func main() {
+	// 파일 + stdout 로그 설정
+	fileLogger := &lumberjack.Logger{
+		Filename:   "logs/musicon.log",
+		MaxSize:    50, // MB
+		MaxBackups: 10,
+		MaxAge:     30, // 일
+		Compress:   true,
+	}
+	multiWriter := io.MultiWriter(os.Stdout, fileLogger)
+	log.SetOutput(multiWriter)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -89,7 +103,9 @@ func main() {
 	})
 
 	app.Use(recover.New())
-	app.Use(logger.New())
+	app.Use(logger.New(logger.Config{
+		Output: multiWriter,
+	}))
 	app.Use(cors.New())
 
 	app.Get("/swagger/*", swagger.HandlerDefault)
