@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"log"
+	"net/url"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -12,17 +14,20 @@ type MusicHandler struct {
 	musicAuthSvc  *service.MusicAuthService
 	musicSyncSvc  *service.MusicSyncService
 	musicQuerySvc *service.MusicQueryService
+	baseURL       string
 }
 
 func NewMusicHandler(
 	musicAuthSvc *service.MusicAuthService,
 	musicSyncSvc *service.MusicSyncService,
 	musicQuerySvc *service.MusicQueryService,
+	baseURL string,
 ) *MusicHandler {
 	return &MusicHandler{
 		musicAuthSvc:  musicAuthSvc,
 		musicSyncSvc:  musicSyncSvc,
 		musicQuerySvc: musicQuerySvc,
+		baseURL:       baseURL,
 	}
 }
 
@@ -90,6 +95,41 @@ func (h *MusicHandler) connect(c *fiber.Ctx, providerName string) error {
 		"success": true,
 		"data":    account,
 	})
+}
+
+// YouTubeCallback godoc
+// @Summary     YouTube OAuth 콜백
+// @Description Google OAuth 인증 후 리디렉트되는 콜백 엔드포인트. 토큰 교환 후 앱으로 리디렉트합니다.
+// @Tags        auth
+// @Param       code  query string false "Authorization code"
+// @Param       state query string false "Expo Push Token (URL-encoded)"
+// @Param       error query string false "OAuth error"
+// @Success     302
+// @Router      /api/auth/youtube/callback [get]
+func (h *MusicHandler) YouTubeCallback(c *fiber.Ctx) error {
+	code := c.Query("code")
+	state := c.Query("state")
+	oauthError := c.Query("error")
+
+	if oauthError != "" {
+		log.Printf("YouTube OAuth error: %s", oauthError)
+		return c.Redirect("musicon://auth-error?provider=youtube&error=" + url.QueryEscape(oauthError))
+	}
+
+	if code == "" || state == "" {
+		return c.Redirect("musicon://auth-error?provider=youtube&error=" + url.QueryEscape("missing code or state"))
+	}
+
+	expoPushToken := state
+	redirectURI := h.baseURL + "/api/auth/youtube/callback"
+
+	account, err := h.musicAuthSvc.Connect(c.Context(), "youtube", code, redirectURI, expoPushToken)
+	if err != nil {
+		log.Printf("YouTube connect failed: %v", err)
+		return c.Redirect("musicon://auth-error?provider=youtube&error=" + url.QueryEscape("연결에 실패했습니다"))
+	}
+
+	return c.Redirect("musicon://auth-success?provider=youtube&name=" + url.QueryEscape(account.DisplayName))
 }
 
 // ListAccounts godoc

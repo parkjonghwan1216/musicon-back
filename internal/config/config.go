@@ -10,6 +10,7 @@ type Config struct {
 	DatabaseURL  string
 	ServerPort   string
 	TJAPIBaseURL string
+	BaseURL      string
 
 	SpotifyClientID     string
 	SpotifyClientSecret string
@@ -41,6 +42,11 @@ func Load() (*Config, error) {
 
 	if cfg.TJAPIBaseURL == "" {
 		cfg.TJAPIBaseURL = "https://www.tjmedia.com/legacy/api/newSongOfMonth"
+	}
+
+	cfg.BaseURL = os.Getenv("BASE_URL")
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = "http://localhost:" + cfg.ServerPort
 	}
 
 	return cfg, nil

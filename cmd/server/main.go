@@ -96,7 +96,7 @@ func main() {
 	songHandler := handler.NewSongHandler(songService)
 	deviceHandler := handler.NewDeviceHandler(deviceService)
 	reservationHandler := handler.NewReservationHandler(reservationService)
-	musicHandler := handler.NewMusicHandler(musicAuthService, musicSyncService, musicQueryService)
+	musicHandler := handler.NewMusicHandler(musicAuthService, musicSyncService, musicQueryService, cfg.BaseURL)
 
 	app := fiber.New(fiber.Config{
 		AppName: "Musicon API",
@@ -124,6 +124,7 @@ func main() {
 
 	api.Post("/music/spotify/connect", musicHandler.ConnectSpotify)
 	api.Post("/music/youtube/connect", musicHandler.ConnectYouTube)
+	api.Get("/auth/youtube/callback", musicHandler.YouTubeCallback)
 	api.Get("/music/accounts", musicHandler.ListAccounts)
 	api.Delete("/music/accounts/:provider", musicHandler.DisconnectAccount)
 	api.Post("/music/sync", musicHandler.SyncTracks)
