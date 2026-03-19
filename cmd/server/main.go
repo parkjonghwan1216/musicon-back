@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"io"
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 	"musicon-back/internal/provider"
 	"musicon-back/internal/repository"
 	"musicon-back/internal/scheduler"
+	"musicon-back/internal/search"
 	"musicon-back/internal/service"
 )
 
@@ -86,7 +89,39 @@ func main() {
 	youtubeProvider := provider.NewYouTubeProvider(cfg.YouTubeClientID, cfg.YouTubeClientSecret)
 	providerRegistry := provider.NewRegistry(spotifyProvider, youtubeProvider)
 
-	songService := service.NewSongService(songRepo)
+	// Bleve 전문 검색 엔진 초기화
+	var songSearcher search.SongSearcher
+	var songIndexer search.SongIndexer
+	var rebuildCancel context.CancelFunc
+	var rebuildWg sync.WaitGroup
+
+	bleveIndex, err := search.OpenOrCreateIndex(cfg.BleveIndexPath)
+	if err != nil {
+		log.Printf("[Search] Failed to open Bleve index, using SQL fallback: %v", err)
+	} else {
+		songSearcher = search.NewBleveSongSearcher(bleveIndex)
+		songIndexer = search.NewBleveSongIndexer(bleveIndex, songRepo)
+
+		// 인덱스가 비어 있으면 백그라운드에서 재구축
+		docCount, _ := bleveIndex.DocCount()
+		if docCount == 0 {
+			var rebuildCtx context.Context
+			rebuildCtx, rebuildCancel = context.WithCancel(context.Background())
+			rebuildWg.Add(1)
+			go func() {
+				defer rebuildWg.Done()
+				if err := songIndexer.RebuildFromDB(rebuildCtx); err != nil {
+					if rebuildCtx.Err() == nil {
+						log.Printf("[Search] Failed to rebuild Bleve index: %v", err)
+					}
+				}
+			}()
+		} else {
+			log.Printf("[Search] Bleve index loaded: %d documents", docCount)
+		}
+	}
+
+	songService := service.NewSongService(songRepo, songSearcher)
 	deviceService := service.NewDeviceService(deviceRepo)
 	reservationService := service.NewReservationService(reservationRepo, deviceRepo)
 	musicAuthService := service.NewMusicAuthService(musicAccountRepo, musicTrackRepo, deviceRepo, providerRegistry)
@@ -134,7 +169,7 @@ func main() {
 	tjFetcher := fetcher.NewTJFetcher(cfg.TJAPIBaseURL)
 	pushService := notification.NewExpoPushService()
 	matchingService := service.NewMatchingService(reservationRepo, pushService)
-	songScheduler := scheduler.NewSongScheduler(tjFetcher, songRepo, matchingService, 12*time.Hour)
+	songScheduler := scheduler.NewSongScheduler(tjFetcher, songRepo, matchingService, songIndexer, 12*time.Hour)
 	songScheduler.Start()
 
 	quit := make(chan os.Signal, 1)
@@ -151,12 +186,26 @@ func main() {
 	<-quit
 	log.Println("Shutting down server...")
 
+	// 1. HTTP 서버 종료 (진행 중인 요청 완료 대기)
+	if err := app.Shutdown(); err != nil {
+		log.Printf("Server shutdown failed: %v", err)
+	}
+
+	// 2. 스케줄러 종료
 	songScheduler.Stop()
 
-	if err := app.Shutdown(); err != nil {
-		log.Fatalf("Server shutdown failed: %v", err)
+	// 3. Bleve 인덱스 재구축 취소 및 대기
+	if rebuildCancel != nil {
+		rebuildCancel()
+	}
+	rebuildWg.Wait()
+
+	// 4. Bleve 인덱스 닫기 (모든 사용자가 완료된 후)
+	if bleveIndex != nil {
+		if err := bleveIndex.Close(); err != nil {
+			log.Printf("[Search] Failed to close Bleve index: %v", err)
+		}
 	}
 
 	log.Println("Server stopped")
 }
-

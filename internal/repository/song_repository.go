@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"musicon-back/internal/domain"
 )
@@ -11,6 +12,8 @@ import (
 type SongRepository interface {
 	Search(ctx context.Context, query string, limit, offset int) ([]domain.Song, error)
 	FindByTjNumber(ctx context.Context, tjNumber int) (*domain.Song, error)
+	FindByTjNumbers(ctx context.Context, tjNumbers []int) ([]domain.Song, error)
+	FindAll(ctx context.Context, limit, offset int) ([]domain.Song, error)
 	UpsertMany(ctx context.Context, songs []domain.Song) (int64, error)
 }
 
@@ -86,6 +89,73 @@ func (r *SQLiteSongRepository) FindByTjNumber(ctx context.Context, tjNumber int)
 	}
 
 	return &s, nil
+}
+
+func (r *SQLiteSongRepository) FindByTjNumbers(ctx context.Context, tjNumbers []int) ([]domain.Song, error) {
+	if len(tjNumbers) == 0 {
+		return nil, nil
+	}
+	if len(tjNumbers) > 999 {
+		return nil, fmt.Errorf("too many TJ numbers: %d (max 999)", len(tjNumbers))
+	}
+
+	placeholders := make([]string, len(tjNumbers))
+	args := make([]any, len(tjNumbers))
+	for i, n := range tjNumbers {
+		placeholders[i] = "?"
+		args[i] = n
+	}
+
+	q := `
+		SELECT id, tj_number, title, artist, lyricist, composer,
+		       title_chosung, artist_chosung, has_mv, published_at, created_at
+		FROM songs
+		WHERE tj_number IN (` + strings.Join(placeholders, ",") + `)
+	`
+
+	rows, err := r.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find songs by TJ numbers: %w", err)
+	}
+	defer rows.Close()
+
+	songs, err := scanSongs(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Bleve score 순서 유지: tjNumbers 순서대로 정렬
+	songMap := make(map[int]domain.Song, len(songs))
+	for _, s := range songs {
+		songMap[s.TjNumber] = s
+	}
+
+	ordered := make([]domain.Song, 0, len(tjNumbers))
+	for _, n := range tjNumbers {
+		if s, ok := songMap[n]; ok {
+			ordered = append(ordered, s)
+		}
+	}
+
+	return ordered, nil
+}
+
+func (r *SQLiteSongRepository) FindAll(ctx context.Context, limit, offset int) ([]domain.Song, error) {
+	q := `
+		SELECT id, tj_number, title, artist, lyricist, composer,
+		       title_chosung, artist_chosung, has_mv, published_at, created_at
+		FROM songs
+		ORDER BY id ASC
+		LIMIT ? OFFSET ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, q, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find all songs: %w", err)
+	}
+	defer rows.Close()
+
+	return scanSongs(rows)
 }
 
 func (r *SQLiteSongRepository) UpsertMany(ctx context.Context, songs []domain.Song) (int64, error) {

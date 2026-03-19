@@ -7,10 +7,11 @@ import (
 )
 
 type Config struct {
-	DatabaseURL  string
-	ServerPort   string
-	TJAPIBaseURL string
-	BaseURL      string
+	DatabaseURL    string
+	ServerPort     string
+	TJAPIBaseURL   string
+	BaseURL        string
+	BleveIndexPath string
 
 	SpotifyClientID     string
 	SpotifyClientSecret string
@@ -42,6 +43,11 @@ func Load() (*Config, error) {
 
 	if cfg.TJAPIBaseURL == "" {
 		cfg.TJAPIBaseURL = "https://www.tjmedia.com/legacy/api/newSongOfMonth"
+	}
+
+	cfg.BleveIndexPath = os.Getenv("BLEVE_INDEX_PATH")
+	if cfg.BleveIndexPath == "" {
+		cfg.BleveIndexPath = "data/bleve_index"
 	}
 
 	cfg.BaseURL = os.Getenv("BASE_URL")

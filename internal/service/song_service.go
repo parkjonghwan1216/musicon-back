@@ -3,17 +3,20 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"musicon-back/internal/domain"
 	"musicon-back/internal/repository"
+	"musicon-back/internal/search"
 )
 
 type SongService struct {
-	repo repository.SongRepository
+	repo     repository.SongRepository
+	searcher search.SongSearcher // nil 허용: Bleve 미사용 시 SQL fallback
 }
 
-func NewSongService(repo repository.SongRepository) *SongService {
-	return &SongService{repo: repo}
+func NewSongService(repo repository.SongRepository, searcher search.SongSearcher) *SongService {
+	return &SongService{repo: repo, searcher: searcher}
 }
 
 func (s *SongService) Search(ctx context.Context, query string, limit, offset int) ([]domain.Song, error) {
@@ -21,9 +24,33 @@ func (s *SongService) Search(ctx context.Context, query string, limit, offset in
 		return nil, fmt.Errorf("search query is required")
 	}
 
-	songs, err := s.repo.Search(ctx, query, limit, offset)
+	// Bleve 우선 검색
+	if s.searcher != nil {
+		songs, err := s.searchWithBleve(ctx, query, limit, offset)
+		if err != nil {
+			log.Printf("[SongService] Bleve search failed, falling back to SQL: %v", err)
+		} else {
+			return songs, nil
+		}
+	}
+
+	// SQL fallback
+	return s.repo.Search(ctx, query, limit, offset)
+}
+
+func (s *SongService) searchWithBleve(ctx context.Context, query string, limit, offset int) ([]domain.Song, error) {
+	tjNumbers, err := s.searcher.Search(ctx, query, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search songs: %w", err)
+		return nil, err
+	}
+
+	if len(tjNumbers) == 0 {
+		return []domain.Song{}, nil
+	}
+
+	songs, err := s.repo.FindByTjNumbers(ctx, tjNumbers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch songs by TJ numbers: %w", err)
 	}
 
 	return songs, nil

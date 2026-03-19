@@ -9,6 +9,7 @@ import (
 	"musicon-back/internal/domain"
 	"musicon-back/internal/fetcher"
 	"musicon-back/internal/repository"
+	"musicon-back/internal/search"
 	"musicon-back/internal/service"
 )
 
@@ -17,6 +18,7 @@ type SongScheduler struct {
 	fetcher         *fetcher.TJFetcher
 	songRepo        repository.SongRepository
 	matchingService *service.MatchingService
+	songIndexer     search.SongIndexer // nil 허용: Bleve 미사용 시 인덱싱 건너뜀
 	interval        time.Duration
 	location        *time.Location
 	stopCh          chan struct{}
@@ -27,6 +29,7 @@ func NewSongScheduler(
 	fetcher *fetcher.TJFetcher,
 	songRepo repository.SongRepository,
 	matchingService *service.MatchingService,
+	songIndexer search.SongIndexer,
 	interval time.Duration,
 ) *SongScheduler {
 	loc, err := time.LoadLocation("Asia/Seoul")
@@ -38,6 +41,7 @@ func NewSongScheduler(
 		fetcher:         fetcher,
 		songRepo:        songRepo,
 		matchingService: matchingService,
+		songIndexer:     songIndexer,
 		interval:        interval,
 		location:        loc,
 		stopCh:          make(chan struct{}),
@@ -98,6 +102,13 @@ func (s *SongScheduler) run() {
 	}
 
 	log.Printf("[Scheduler] Upserted %d songs", inserted)
+
+	// Bleve 인덱스 증분 업데이트
+	if s.songIndexer != nil {
+		if err := s.songIndexer.IndexSongs(ctx, songs); err != nil {
+			log.Printf("[Scheduler] Bleve index update failed: %v", err)
+		}
+	}
 
 	matched, err := s.matchingService.MatchNewSongs(ctx, songs)
 	if err != nil {

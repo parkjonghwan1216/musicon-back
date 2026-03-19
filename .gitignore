@@ -33,6 +33,9 @@ vendor/
 *.db-wal
 *.db-journal
 
+# Bleve index
+data/bleve_index/
+
 # Build output
 build/
 
