@@ -36,6 +36,9 @@ vendor/
 # Bleve index
 data/bleve_index/
 
+# Logs
+logs/
+
 # Build output
 build/
 
