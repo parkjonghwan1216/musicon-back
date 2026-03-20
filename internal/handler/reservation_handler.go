@@ -48,10 +48,10 @@ func (h *ReservationHandler) Create(c *fiber.Ctx) error {
 		})
 	}
 
-	if req.ExpoPushToken == "" || req.Artist == "" || req.Title == "" {
+	if req.ExpoPushToken == "" || req.Artist == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
-			"error":   "expo_push_token, artist, and title are required",
+			"error":   "expo_push_token and artist are required",
 		})
 	}
 
@@ -134,10 +134,10 @@ func (h *ReservationHandler) Update(c *fiber.Ctx) error {
 		})
 	}
 
-	if req.ExpoPushToken == "" || req.Artist == "" || req.Title == "" {
+	if req.ExpoPushToken == "" || req.Artist == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
-			"error":   "expo_push_token, artist, and title are required",
+			"error":   "expo_push_token and artist are required",
 		})
 	}
 

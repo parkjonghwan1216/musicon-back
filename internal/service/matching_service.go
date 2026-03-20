@@ -27,6 +27,8 @@ func NewMatchingService(
 }
 
 // MatchNewSongs checks new songs against active reservations using partial matching.
+// Artist-only reservations (title == "") match all songs by that artist and stay active.
+// Artist+title reservations match once and transition to matched status.
 // Returns the number of matches found.
 func (s *MatchingService) MatchNewSongs(ctx context.Context, newSongs []domain.Song) (int, error) {
 	activeReservations, err := s.reservationRepo.FindActiveWithTokens(ctx)
@@ -43,15 +45,29 @@ func (s *MatchingService) MatchNewSongs(ctx context.Context, newSongs []domain.S
 
 	var matches []domain.MatchResult
 
-	for _, song := range newSongs {
-		songArtist := strings.ToLower(song.Artist)
-		songTitle := strings.ToLower(song.Title)
+	for _, ar := range activeReservations {
+		resArtist := strings.ToLower(ar.Reservation.Artist)
+		resTitle := strings.ToLower(ar.Reservation.Title)
 
-		for _, ar := range activeReservations {
-			resArtist := strings.ToLower(ar.Reservation.Artist)
-			resTitle := strings.ToLower(ar.Reservation.Title)
+		for _, song := range newSongs {
+			songArtist := strings.ToLower(song.Artist)
+			songTitle := strings.ToLower(song.Title)
 
-			if strings.Contains(songArtist, resArtist) && strings.Contains(songTitle, resTitle) {
+			artistMatch := strings.Contains(songArtist, resArtist)
+			titleMatch := ar.Reservation.IsArtistOnly() || strings.Contains(songTitle, resTitle)
+
+			if artistMatch && titleMatch {
+				if ar.Reservation.IsArtistOnly() {
+					notified, err := s.reservationRepo.HasNotified(ctx, ar.Reservation.ID, song.ID)
+					if err != nil {
+						log.Printf("Warning: failed to check notification history: %v", err)
+						continue
+					}
+					if notified {
+						continue
+					}
+				}
+
 				matches = append(matches, domain.MatchResult{
 					Reservation:   ar.Reservation,
 					Song:          song,
@@ -68,22 +84,24 @@ func (s *MatchingService) MatchNewSongs(ctx context.Context, newSongs []domain.S
 
 	log.Printf("Found %d matches, sending notifications", len(matches))
 
-	// Mark as matched
-	for _, m := range matches {
-		if err := s.reservationRepo.MarkAsMatched(ctx, m.Reservation.ID, m.Song.ID); err != nil {
-			log.Printf("Warning: failed to mark reservation %d as matched: %v", m.Reservation.ID, err)
-		}
-	}
-
-	// Send notifications
+	// Send notifications first to avoid losing notifications on record failure
 	if err := s.sender.SendBatch(ctx, matches); err != nil {
-		return len(matches), fmt.Errorf("failed to send notifications: %w", err)
+		return 0, fmt.Errorf("failed to send notifications: %w", err)
 	}
 
-	// Mark as notified
+	// Record/mark after successful send
 	for _, m := range matches {
-		if err := s.reservationRepo.MarkAsNotified(ctx, m.Reservation.ID); err != nil {
-			log.Printf("Warning: failed to mark reservation %d as notified: %v", m.Reservation.ID, err)
+		if m.Reservation.IsArtistOnly() {
+			if err := s.reservationRepo.RecordNotification(ctx, m.Reservation.ID, m.Song.ID); err != nil {
+				log.Printf("Warning: failed to record notification for reservation %d: %v", m.Reservation.ID, err)
+			}
+		} else {
+			if err := s.reservationRepo.MarkAsMatched(ctx, m.Reservation.ID, m.Song.ID); err != nil {
+				log.Printf("Warning: failed to mark reservation %d as matched: %v", m.Reservation.ID, err)
+			}
+			if err := s.reservationRepo.MarkAsNotified(ctx, m.Reservation.ID); err != nil {
+				log.Printf("Warning: failed to mark reservation %d as notified: %v", m.Reservation.ID, err)
+			}
 		}
 	}
 

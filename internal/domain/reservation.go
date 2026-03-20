@@ -20,6 +20,12 @@ type Reservation struct {
 	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
+// IsArtistOnly returns true if this reservation subscribes to all songs by the artist
+// (title is empty), rather than a specific song.
+func (r Reservation) IsArtistOnly() bool {
+	return r.Title == ""
+}
+
 // MatchResult holds a matched reservation along with the song and push token
 // for sending notifications.
 type MatchResult struct {

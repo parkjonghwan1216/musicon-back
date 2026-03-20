@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,6 +19,8 @@ type ReservationRepository interface {
 	FindActiveWithTokens(ctx context.Context) ([]activeReservation, error)
 	MarkAsMatched(ctx context.Context, reservationID, songID int64) error
 	MarkAsNotified(ctx context.Context, reservationID int64) error
+	HasNotified(ctx context.Context, reservationID, songID int64) (bool, error)
+	RecordNotification(ctx context.Context, reservationID, songID int64) error
 }
 
 // activeReservation holds reservation data joined with the device's push token.
@@ -133,6 +136,10 @@ func (r *SQLiteReservationRepository) Delete(ctx context.Context, id int64) erro
 	return nil
 }
 
+// FindActiveWithTokens returns active reservations that still need matching:
+// - Artist+title reservations: status='active' AND notified_at IS NULL (one-time match)
+// - Artist-only reservations: status='active' AND notified_at is always NULL
+//   (uses reservation_notifications table for per-song dedup instead)
 func (r *SQLiteReservationRepository) FindActiveWithTokens(ctx context.Context) ([]activeReservation, error) {
 	q := `
 		SELECT r.id, r.device_id, r.artist, r.title, r.status,
@@ -196,6 +203,31 @@ func (r *SQLiteReservationRepository) MarkAsNotified(ctx context.Context, reserv
 	now := time.Now()
 	if _, err := r.db.ExecContext(ctx, q, now, now, reservationID); err != nil {
 		return fmt.Errorf("failed to mark reservation as notified: %w", err)
+	}
+
+	return nil
+}
+
+func (r *SQLiteReservationRepository) HasNotified(ctx context.Context, reservationID, songID int64) (bool, error) {
+	q := `SELECT 1 FROM reservation_notifications WHERE reservation_id = ? AND song_id = ?`
+
+	var exists int
+	err := r.db.QueryRowContext(ctx, q, reservationID, songID).Scan(&exists)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check notification history: %w", err)
+	}
+
+	return true, nil
+}
+
+func (r *SQLiteReservationRepository) RecordNotification(ctx context.Context, reservationID, songID int64) error {
+	q := `INSERT OR IGNORE INTO reservation_notifications (reservation_id, song_id) VALUES (?, ?)`
+
+	if _, err := r.db.ExecContext(ctx, q, reservationID, songID); err != nil {
+		return fmt.Errorf("failed to record notification: %w", err)
 	}
 
 	return nil

@@ -24,8 +24,8 @@ func NewReservationService(
 }
 
 func (s *ReservationService) Create(ctx context.Context, token, artist, title string) (*domain.Reservation, error) {
-	if artist == "" || title == "" {
-		return nil, fmt.Errorf("artist and title are required")
+	if artist == "" {
+		return nil, fmt.Errorf("artist is required")
 	}
 
 	device, err := s.deviceRepo.FindByToken(ctx, token)
@@ -62,8 +62,8 @@ func (s *ReservationService) ListByDevice(ctx context.Context, token string) ([]
 }
 
 func (s *ReservationService) Update(ctx context.Context, token string, id int64, artist, title string) (*domain.Reservation, error) {
-	if artist == "" || title == "" {
-		return nil, fmt.Errorf("artist and title are required")
+	if artist == "" {
+		return nil, fmt.Errorf("artist is required")
 	}
 
 	device, err := s.deviceRepo.FindByToken(ctx, token)
