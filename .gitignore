@@ -5,6 +5,7 @@
 *.so
 *.dylib
 /musicon-back
+/musicon-server
 
 # Test binary
 *.test
