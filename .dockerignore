@@ -39,9 +39,8 @@ docker-compose*.yml
 deploy/
 .github/
 
-# Docs
+# Docs (docs/ 제외 불가 — docs/docs.go는 Swagger 코드 패키지)
 README.md
-docs/
 
 # Test files
 *_test.go
