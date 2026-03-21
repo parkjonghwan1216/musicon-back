@@ -1,12 +1,16 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,31 +18,46 @@ import (
 	"golang.org/x/oauth2/google"
 
 	"musicon-back/internal/domain"
-	"musicon-back/internal/matcher"
 )
 
 const (
-	youtubeAPIBase       = "https://www.googleapis.com/youtube/v3"
-	youtubeMaxResults    = 50
-	youtubeMaxTracks     = 500
-	youtubeMusicCategory = "10" // YouTube video category ID for Music
+	youtubeAPIBase     = "https://www.googleapis.com/youtube/v3"
+	scriptTimeout      = 60 * time.Second
+	maxStderrLen       = 200
 )
 
-// YouTubeProvider implements MusicProvider for YouTube Music via the YouTube Data API.
+// YouTubeProvider implements MusicProvider for YouTube Music via ytmusicapi Python sidecar.
 type YouTubeProvider struct {
 	oauthCfg   *oauth2.Config
 	httpClient *http.Client
+	scriptPath string
 }
 
 // NewYouTubeProvider creates a new YouTube provider with the given OAuth credentials.
-func NewYouTubeProvider(clientID, clientSecret string) *YouTubeProvider {
+// It validates that scriptPath exists and is a .py file.
+func NewYouTubeProvider(clientID, clientSecret, scriptPath string) *YouTubeProvider {
+	absPath, err := filepath.Abs(filepath.Clean(scriptPath))
+	if err != nil {
+		panic(fmt.Sprintf("youtube: invalid script path %q: %v", scriptPath, err))
+	}
+	if strings.Contains(filepath.Clean(scriptPath), "..") {
+		panic(fmt.Sprintf("youtube: path traversal not allowed: %q", scriptPath))
+	}
+	if !strings.HasSuffix(absPath, ".py") {
+		panic(fmt.Sprintf("youtube: script must be a .py file: %q", absPath))
+	}
+	if info, err := os.Stat(absPath); err != nil || info.IsDir() {
+		panic(fmt.Sprintf("youtube: script not found or is a directory: %q", absPath))
+	}
+
 	return &YouTubeProvider{
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		scriptPath: absPath,
 		oauthCfg: &oauth2.Config{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
 			Endpoint:     google.Endpoint,
-			Scopes:       []string{"https://www.googleapis.com/auth/youtube.readonly"},
+			Scopes:       []string{"https://www.googleapis.com/auth/youtube"},
 		},
 	}
 }
@@ -89,153 +108,69 @@ func (p *YouTubeProvider) RefreshAccessToken(ctx context.Context, refreshToken s
 	}, nil
 }
 
+// scriptInput is the JSON payload sent to the Python sidecar via stdin.
+type scriptInput struct {
+	AccessToken  string `json:"access_token"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+}
+
+// scriptTrack maps to the JSON output from the Python sidecar.
+type scriptTrack struct {
+	ExternalID string `json:"external_id"`
+	Title      string `json:"title"`
+	Artist     string `json:"artist"`
+	AlbumName  string `json:"album_name"`
+	ImageURL   string `json:"image_url"`
+}
+
 func (p *YouTubeProvider) FetchUserTracks(ctx context.Context, accessToken string) ([]ExternalTrack, error) {
-	// Fetch liked videos (playlist ID = "LL")
-	return p.fetchPlaylistItems(ctx, accessToken, "LL", youtubeMaxTracks)
-}
+	ctx, cancel := context.WithTimeout(ctx, scriptTimeout)
+	defer cancel()
 
-type youtubePlaylistResponse struct {
-	Items []struct {
-		Snippet struct {
-			ResourceID struct {
-				VideoID string `json:"videoId"`
-			} `json:"resourceId"`
-			Title      string `json:"title"`
-			Thumbnails struct {
-				Default struct {
-					URL string `json:"url"`
-				} `json:"default"`
-			} `json:"thumbnails"`
-		} `json:"snippet"`
-	} `json:"items"`
-	NextPageToken string `json:"nextPageToken"`
-}
-
-// playlistItem holds raw data fetched from YouTube playlistItems API before category filtering.
-type playlistItem struct {
-	videoID  string
-	title    string
-	imageURL string
-}
-
-func (p *YouTubeProvider) fetchPlaylistItems(ctx context.Context, accessToken, playlistID string, maxCount int) ([]ExternalTrack, error) {
-	// Step 1: Collect raw playlist items with video IDs.
-	var items []playlistItem
-	pageToken := ""
-
-	for len(items) < maxCount {
-		params := url.Values{
-			"part":       {"snippet"},
-			"playlistId": {playlistID},
-			"maxResults": {fmt.Sprintf("%d", youtubeMaxResults)},
-		}
-		if pageToken != "" {
-			params.Set("pageToken", pageToken)
-		}
-
-		reqURL := youtubeAPIBase + "/playlistItems?" + params.Encode()
-		body, err := p.youtubeGet(ctx, accessToken, reqURL)
-		if err != nil {
-			return nil, err
-		}
-
-		var resp youtubePlaylistResponse
-		if err := json.Unmarshal(body, &resp); err != nil {
-			return nil, fmt.Errorf("youtube parse playlist failed: %w", err)
-		}
-
-		for _, item := range resp.Items {
-			items = append(items, playlistItem{
-				videoID:  item.Snippet.ResourceID.VideoID,
-				title:    item.Snippet.Title,
-				imageURL: item.Snippet.Thumbnails.Default.URL,
-			})
-		}
-
-		if resp.NextPageToken == "" || len(resp.Items) == 0 {
-			break
-		}
-		pageToken = resp.NextPageToken
+	input := scriptInput{
+		AccessToken:  accessToken,
+		ClientID:     p.oauthCfg.ClientID,
+		ClientSecret: p.oauthCfg.ClientSecret,
 	}
 
-	if len(items) > maxCount {
-		items = items[:maxCount]
-	}
-
-	// Step 2: Filter by Music category (categoryId=10) in batches.
-	musicIDs, err := p.filterMusicVideoIDs(ctx, accessToken, items)
+	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ytmusic script: failed to marshal input: %w", err)
 	}
 
-	// Step 3: Build ExternalTrack list from filtered items.
-	var all []ExternalTrack
-	for _, item := range items {
-		if !musicIDs[item.videoID] {
-			continue
+	cmd := exec.CommandContext(ctx, "python3", p.scriptPath)
+	cmd.Stdin = bytes.NewReader(inputJSON)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		stderrMsg := stderr.String()
+		if len(stderrMsg) > maxStderrLen {
+			stderrMsg = stderrMsg[:maxStderrLen] + "..."
 		}
-		artist, title := matcher.ParseYouTubeTitle(item.title)
-		all = append(all, ExternalTrack{
-			ExternalID: item.videoID,
-			Title:      title,
-			Artist:     artist,
-			ImageURL:   item.imageURL,
-		})
+		return nil, fmt.Errorf("ytmusic script failed: %w, stderr: %s", err, stderrMsg)
 	}
 
-	return all, nil
-}
+	var tracks []scriptTrack
+	if err := json.Unmarshal(stdout.Bytes(), &tracks); err != nil {
+		return nil, fmt.Errorf("ytmusic script: failed to parse output: %w", err)
+	}
 
-// youtubeVideosResponse represents the response from YouTube /videos API.
-type youtubeVideosResponse struct {
-	Items []struct {
-		ID      string `json:"id"`
-		Snippet struct {
-			CategoryID string `json:"categoryId"`
-		} `json:"snippet"`
-	} `json:"items"`
-}
-
-// filterMusicVideoIDs calls the YouTube /videos API in batches of 50 to check each video's
-// category. Returns a set of video IDs that belong to the Music category (categoryId=10).
-func (p *YouTubeProvider) filterMusicVideoIDs(ctx context.Context, accessToken string, items []playlistItem) (map[string]bool, error) {
-	musicIDs := make(map[string]bool, len(items))
-
-	for i := 0; i < len(items); i += youtubeMaxResults {
-		end := i + youtubeMaxResults
-		if end > len(items) {
-			end = len(items)
-		}
-
-		var ids []string
-		for _, item := range items[i:end] {
-			ids = append(ids, item.videoID)
-		}
-
-		params := url.Values{
-			"part": {"snippet"},
-			"id":   {strings.Join(ids, ",")},
-		}
-		reqURL := youtubeAPIBase + "/videos?" + params.Encode()
-
-		body, err := p.youtubeGet(ctx, accessToken, reqURL)
-		if err != nil {
-			return nil, fmt.Errorf("youtube filter videos failed: %w", err)
-		}
-
-		var resp youtubeVideosResponse
-		if err := json.Unmarshal(body, &resp); err != nil {
-			return nil, fmt.Errorf("youtube parse videos failed: %w", err)
-		}
-
-		for _, v := range resp.Items {
-			if v.Snippet.CategoryID == youtubeMusicCategory {
-				musicIDs[v.ID] = true
-			}
+	result := make([]ExternalTrack, len(tracks))
+	for i, t := range tracks {
+		result[i] = ExternalTrack{
+			ExternalID: t.ExternalID,
+			Title:      t.Title,
+			Artist:     t.Artist,
+			AlbumName:  t.AlbumName,
+			ImageURL:   t.ImageURL,
 		}
 	}
 
-	return musicIDs, nil
+	return result, nil
 }
 
 type youtubeChannelResponse struct {

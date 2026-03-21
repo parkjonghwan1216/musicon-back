@@ -4,50 +4,73 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          go-version: '1.25'
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o musicon-server ./cmd/server
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
 
-      - name: Setup SSH
-        env:
-          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          HOST: ${{ secrets.SERVER_HOST }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H $HOST >> ~/.ssh/known_hosts 2>/dev/null
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Upload binary and migrations
-        env:
-          HOST: ${{ secrets.SERVER_HOST }}
-        run: |
-          scp -i ~/.ssh/deploy_key musicon-server ubuntu@$HOST:~/musicon-server-new
-          ssh -i ~/.ssh/deploy_key ubuntu@$HOST "mkdir -p ~/musicon-migrations"
-          scp -i ~/.ssh/deploy_key migrations/*.sql ubuntu@$HOST:~/musicon-migrations/
+      - name: Copy compose file to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: docker-compose.prod.yml,deploy/.env.example
+          target: ~/musicon
+          overwrite: true
 
-      - name: Deploy and restart
-        env:
-          HOST: ${{ secrets.SERVER_HOST }}
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@$HOST "\
-            sudo systemctl stop musicon && \
-            sudo cp ~/musicon-server-new /opt/musicon/musicon-server && \
-            sudo chmod +x /opt/musicon/musicon-server && \
-            sudo cp ~/musicon-migrations/*.sql /opt/musicon/migrations/ && \
-            sudo mkdir -p /opt/musicon/logs && \
-            sudo chown -R musicon:musicon /opt/musicon && \
-            sudo systemctl start musicon && \
-            rm -rf ~/musicon-server-new ~/musicon-migrations && \
-            sleep 3 && \
-            curl -sf localhost:7847/health && \
-            echo 'Deploy successful'"
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo ${{ secrets.GITHUB_TOKEN }} | sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            cd ~/musicon
+            sudo docker compose -f docker-compose.prod.yml pull
+            sudo docker compose -f docker-compose.prod.yml up -d
+            sleep 5
+            curl -sf http://localhost:7847/health && echo 'Deploy successful'
+            sudo docker image prune -f

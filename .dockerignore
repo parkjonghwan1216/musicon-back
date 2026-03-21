@@ -1,0 +1,51 @@
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Data & logs
+data/
+logs/
+
+# Build output
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+musicon-server
+
+# Environment
+.env
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude
+.claude/
+
+# Docker & CI
+Dockerfile
+docker-compose*.yml
+deploy/
+.github/
+
+# Docs
+README.md
+docs/
+
+# Test files
+*_test.go
+
+# OS
+.DS_Store
+Thumbs.db

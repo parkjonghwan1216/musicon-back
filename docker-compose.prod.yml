@@ -1,0 +1,22 @@
+name: musicon
+
+services:
+  server:
+    image: ghcr.io/parkjonghwan1216/musicon-back:latest
+    ports:
+      - "7847:7847"
+    env_file:
+      - deploy/.env
+    volumes:
+      - /opt/musicon/data:/app/data
+      - /opt/musicon/logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
