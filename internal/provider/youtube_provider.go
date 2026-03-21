@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -17,9 +18,10 @@ import (
 )
 
 const (
-	youtubeAPIBase    = "https://www.googleapis.com/youtube/v3"
-	youtubeMaxResults = 50
-	youtubeMaxTracks  = 500
+	youtubeAPIBase       = "https://www.googleapis.com/youtube/v3"
+	youtubeMaxResults    = 50
+	youtubeMaxTracks     = 500
+	youtubeMusicCategory = "10" // YouTube video category ID for Music
 )
 
 // YouTubeProvider implements MusicProvider for YouTube Music via the YouTube Data API.
@@ -109,11 +111,19 @@ type youtubePlaylistResponse struct {
 	NextPageToken string `json:"nextPageToken"`
 }
 
+// playlistItem holds raw data fetched from YouTube playlistItems API before category filtering.
+type playlistItem struct {
+	videoID  string
+	title    string
+	imageURL string
+}
+
 func (p *YouTubeProvider) fetchPlaylistItems(ctx context.Context, accessToken, playlistID string, maxCount int) ([]ExternalTrack, error) {
-	var all []ExternalTrack
+	// Step 1: Collect raw playlist items with video IDs.
+	var items []playlistItem
 	pageToken := ""
 
-	for len(all) < maxCount {
+	for len(items) < maxCount {
 		params := url.Values{
 			"part":       {"snippet"},
 			"playlistId": {playlistID},
@@ -135,12 +145,10 @@ func (p *YouTubeProvider) fetchPlaylistItems(ctx context.Context, accessToken, p
 		}
 
 		for _, item := range resp.Items {
-			artist, title := matcher.ParseYouTubeTitle(item.Snippet.Title)
-			all = append(all, ExternalTrack{
-				ExternalID: item.Snippet.ResourceID.VideoID,
-				Title:      title,
-				Artist:     artist,
-				ImageURL:   item.Snippet.Thumbnails.Default.URL,
+			items = append(items, playlistItem{
+				videoID:  item.Snippet.ResourceID.VideoID,
+				title:    item.Snippet.Title,
+				imageURL: item.Snippet.Thumbnails.Default.URL,
 			})
 		}
 
@@ -150,11 +158,84 @@ func (p *YouTubeProvider) fetchPlaylistItems(ctx context.Context, accessToken, p
 		pageToken = resp.NextPageToken
 	}
 
-	if len(all) > maxCount {
-		all = all[:maxCount]
+	if len(items) > maxCount {
+		items = items[:maxCount]
+	}
+
+	// Step 2: Filter by Music category (categoryId=10) in batches.
+	musicIDs, err := p.filterMusicVideoIDs(ctx, accessToken, items)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 3: Build ExternalTrack list from filtered items.
+	var all []ExternalTrack
+	for _, item := range items {
+		if !musicIDs[item.videoID] {
+			continue
+		}
+		artist, title := matcher.ParseYouTubeTitle(item.title)
+		all = append(all, ExternalTrack{
+			ExternalID: item.videoID,
+			Title:      title,
+			Artist:     artist,
+			ImageURL:   item.imageURL,
+		})
 	}
 
 	return all, nil
+}
+
+// youtubeVideosResponse represents the response from YouTube /videos API.
+type youtubeVideosResponse struct {
+	Items []struct {
+		ID      string `json:"id"`
+		Snippet struct {
+			CategoryID string `json:"categoryId"`
+		} `json:"snippet"`
+	} `json:"items"`
+}
+
+// filterMusicVideoIDs calls the YouTube /videos API in batches of 50 to check each video's
+// category. Returns a set of video IDs that belong to the Music category (categoryId=10).
+func (p *YouTubeProvider) filterMusicVideoIDs(ctx context.Context, accessToken string, items []playlistItem) (map[string]bool, error) {
+	musicIDs := make(map[string]bool, len(items))
+
+	for i := 0; i < len(items); i += youtubeMaxResults {
+		end := i + youtubeMaxResults
+		if end > len(items) {
+			end = len(items)
+		}
+
+		var ids []string
+		for _, item := range items[i:end] {
+			ids = append(ids, item.videoID)
+		}
+
+		params := url.Values{
+			"part": {"snippet"},
+			"id":   {strings.Join(ids, ",")},
+		}
+		reqURL := youtubeAPIBase + "/videos?" + params.Encode()
+
+		body, err := p.youtubeGet(ctx, accessToken, reqURL)
+		if err != nil {
+			return nil, fmt.Errorf("youtube filter videos failed: %w", err)
+		}
+
+		var resp youtubeVideosResponse
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return nil, fmt.Errorf("youtube parse videos failed: %w", err)
+		}
+
+		for _, v := range resp.Items {
+			if v.Snippet.CategoryID == youtubeMusicCategory {
+				musicIDs[v.ID] = true
+			}
+		}
+	}
+
+	return musicIDs, nil
 }
 
 type youtubeChannelResponse struct {

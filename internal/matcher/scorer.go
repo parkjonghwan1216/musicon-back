@@ -9,8 +9,14 @@ const (
 
 // Score computes a weighted similarity score between an external track and a TJ song.
 // Both title and artist strings should already be normalized.
+// When the track artist is missing, the score is based solely on the title similarity.
 func Score(trackTitle, trackArtist, songTitle, songArtist string) float64 {
 	titleScore := JaroWinkler(trackTitle, songTitle)
+
+	if trackArtist == "" {
+		return titleScore
+	}
+
 	artistScore := JaroWinkler(trackArtist, songArtist)
 	return titleScore*titleWeight + artistScore*artistWeight
 }

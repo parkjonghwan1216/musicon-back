@@ -37,22 +37,26 @@ func Normalize(s string) string {
 	return s
 }
 
+// separators lists common artist-title separators found in YouTube titles.
+var separators = []string{" - ", " – ", " — ", " | "}
+
 // ParseYouTubeTitle attempts to split a YouTube video title into artist and title.
 // YouTube titles often follow the pattern "Artist - Title" or "Artist - Title (MV)".
 func ParseYouTubeTitle(raw string) (artist, title string) {
 	raw = strings.TrimSpace(raw)
 
-	// Try splitting on " - " separator (most common pattern)
-	parts := strings.SplitN(raw, " - ", 2)
-	if len(parts) == 2 {
-		artist = strings.TrimSpace(parts[0])
-		title = strings.TrimSpace(parts[1])
-		// Remove noise from title
-		title = parenRe.ReplaceAllString(title, "")
-		title = noiseRe.ReplaceAllString(title, "")
-		title = trailingPuncRe.ReplaceAllString(title, "")
-		title = strings.TrimSpace(title)
-		return artist, title
+	for _, sep := range separators {
+		parts := strings.SplitN(raw, sep, 2)
+		if len(parts) == 2 {
+			artist = strings.TrimSpace(parts[0])
+			title = strings.TrimSpace(parts[1])
+			// Remove noise from title
+			title = parenRe.ReplaceAllString(title, "")
+			title = noiseRe.ReplaceAllString(title, "")
+			title = trailingPuncRe.ReplaceAllString(title, "")
+			title = strings.TrimSpace(title)
+			return artist, title
+		}
 	}
 
 	// Fallback: use whole string as title
