@@ -10,6 +10,7 @@ stderr: 에러 메시지 (exit code 1)
 
 import json
 import sys
+import time
 
 LIKED_SONGS_LIMIT = 500
 
@@ -49,6 +50,7 @@ def main():
             "refresh_token": refresh_token,
             "token_type": "Bearer",
             "scope": "https://www.googleapis.com/auth/youtube",
+            "expires_at": int(time.time()) + 3600,
         })
         ytmusic = YTMusic(auth=token_json, oauth_credentials=oauth_credentials)
     except (ValueError, TypeError, KeyError) as e:
