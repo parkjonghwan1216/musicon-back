@@ -89,7 +89,7 @@ func (p *SpotifyProvider) RefreshAccessToken(ctx context.Context, refreshToken s
 	}, nil
 }
 
-func (p *SpotifyProvider) FetchUserTracks(ctx context.Context, accessToken string) ([]ExternalTrack, error) {
+func (p *SpotifyProvider) FetchUserTracks(ctx context.Context, accessToken, _ string) ([]ExternalTrack, error) {
 	var tracks []ExternalTrack
 
 	// Fetch top tracks (medium term)

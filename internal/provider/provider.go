@@ -32,5 +32,5 @@ type MusicProvider interface {
 	// RefreshAccessToken refreshes an expired access token.
 	RefreshAccessToken(ctx context.Context, refreshToken string) (*TokenResult, error)
 	// FetchUserTracks fetches the user's liked/top tracks.
-	FetchUserTracks(ctx context.Context, accessToken string) ([]ExternalTrack, error)
+	FetchUserTracks(ctx context.Context, accessToken, refreshToken string) ([]ExternalTrack, error)
 }

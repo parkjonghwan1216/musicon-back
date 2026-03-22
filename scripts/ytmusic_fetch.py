@@ -1,9 +1,9 @@
 """ytmusic_fetch.py — ytmusicapi를 사용하여 YouTube Music 좋아하는 노래를 가져오는 사이드카 스크립트.
 
 사용법:
-    echo '{"access_token":"...","client_id":"...","client_secret":"..."}' | python3 ytmusic_fetch.py
+    echo '{"access_token":"...","refresh_token":"...","client_id":"...","client_secret":"..."}' | python3 ytmusic_fetch.py
 
-stdin: JSON { access_token, client_id, client_secret }
+stdin: JSON { access_token, refresh_token, client_id, client_secret }
 stdout: JSON [{ external_id, title, artist, album_name, image_url }, ...]
 stderr: 에러 메시지 (exit code 1)
 """
@@ -23,10 +23,11 @@ def main():
         sys.exit(1)
 
     access_token = params.get("access_token", "")
+    refresh_token = params.get("refresh_token", "")
     client_id = params.get("client_id", "")
     client_secret = params.get("client_secret", "")
 
-    missing = [f for f in ("access_token", "client_id", "client_secret")
+    missing = [f for f in ("access_token", "refresh_token", "client_id", "client_secret")
                if not params.get(f)]
     if missing:
         print(f"필수 필드 누락: {', '.join(missing)}", file=sys.stderr)
@@ -45,7 +46,9 @@ def main():
         )
         token_json = json.dumps({
             "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "Bearer",
+            "scope": "https://www.googleapis.com/auth/youtube",
         })
         ytmusic = YTMusic(auth=token_json, oauth_credentials=oauth_credentials)
     except (ValueError, TypeError, KeyError) as e:

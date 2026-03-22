@@ -111,6 +111,7 @@ func (p *YouTubeProvider) RefreshAccessToken(ctx context.Context, refreshToken s
 // scriptInput is the JSON payload sent to the Python sidecar via stdin.
 type scriptInput struct {
 	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 }
@@ -124,12 +125,13 @@ type scriptTrack struct {
 	ImageURL   string `json:"image_url"`
 }
 
-func (p *YouTubeProvider) FetchUserTracks(ctx context.Context, accessToken string) ([]ExternalTrack, error) {
+func (p *YouTubeProvider) FetchUserTracks(ctx context.Context, accessToken, refreshToken string) ([]ExternalTrack, error) {
 	ctx, cancel := context.WithTimeout(ctx, scriptTimeout)
 	defer cancel()
 
 	input := scriptInput{
 		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 		ClientID:     p.oauthCfg.ClientID,
 		ClientSecret: p.oauthCfg.ClientSecret,
 	}

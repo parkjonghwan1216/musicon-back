@@ -92,7 +92,7 @@ func (s *MusicSyncService) syncProvider(ctx context.Context, account *domain.Mus
 	}
 
 	// Fetch external tracks
-	externalTracks, err := p.FetchUserTracks(ctx, account.AccessToken)
+	externalTracks, err := p.FetchUserTracks(ctx, account.AccessToken, account.RefreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch tracks: %w", err)
 	}
