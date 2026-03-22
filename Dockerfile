@@ -8,16 +8,15 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o musicon-server ./cmd/server
 
-# Stage 2: Python runtime + Go binary
-FROM python:3.12-slim-bookworm
-RUN apt-get update && apt-get install -y --no-install-recommends curl && \
-    rm -rf /var/lib/apt/lists/* && \
-    pip install --no-cache-dir ytmusicapi
+# Stage 2: Minimal runtime (no Python needed)
+FROM debian:bookworm-slim
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
 RUN groupadd -r -g 997 appuser && useradd -r -u 997 -g appuser -d /app -s /sbin/nologin appuser
 WORKDIR /app
 COPY --from=builder /build/musicon-server .
 COPY migrations/ migrations/
-COPY scripts/ scripts/
 RUN chown -R appuser:appuser /app
 USER appuser
 EXPOSE 7847

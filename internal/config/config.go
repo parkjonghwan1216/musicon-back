@@ -17,7 +17,6 @@ type Config struct {
 	SpotifyClientSecret string
 	YouTubeClientID     string
 	YouTubeClientSecret string
-	YTMusicScript       string
 }
 
 func Load() (*Config, error) {
@@ -54,11 +53,6 @@ func Load() (*Config, error) {
 	cfg.BaseURL = os.Getenv("BASE_URL")
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "http://localhost:" + cfg.ServerPort
-	}
-
-	cfg.YTMusicScript = os.Getenv("YTMUSIC_SCRIPT")
-	if cfg.YTMusicScript == "" {
-		cfg.YTMusicScript = "scripts/ytmusic_fetch.py"
 	}
 
 	return cfg, nil

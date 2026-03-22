@@ -86,7 +86,7 @@ func main() {
 
 	// Music providers
 	spotifyProvider := provider.NewSpotifyProvider(cfg.SpotifyClientID, cfg.SpotifyClientSecret)
-	youtubeProvider := provider.NewYouTubeProvider(cfg.YouTubeClientID, cfg.YouTubeClientSecret, cfg.YTMusicScript)
+	youtubeProvider := provider.NewYouTubeProvider(cfg.YouTubeClientID, cfg.YouTubeClientSecret)
 	providerRegistry := provider.NewRegistry(spotifyProvider, youtubeProvider)
 
 	// Bleve 전문 검색 엔진 초기화
